@@ -25,10 +25,36 @@
 
 # Capture the raid array details to append to mdadm.conf
 # in order to persist between reboots
-- name: arrays | Capturing Array Details
+- name: arrays | Capturing Array List
   command: "mdadm --detail --scan"
   register: "array_details"
   changed_when: false
+
+- name: arrays | Capturing Array Details
+  command: "mdadm --detail {{ item | regex_replace('^ARRAY ([^ ]+).*$', '\\1') }} --export"
+  register: "array_details"
+  changed_when: false
+  with_items: '{{ array_details.stdout_lines }}'
+  when: ansible_os_family == "RedHat"
+
+- name: arrays | Generating mdadm.conf
+  set_fact:
+    mdadm_conf_entries: "{{ mdadm_conf_entries|default([]) + [entry] }}"
+  vars:
+    MD_DEVNAME: "{{ item.lines | select('search', '^MD_DEVNAME=') | join('') | regex_replace('^[^=]+=(.+)$', '\\1') }}"
+    MD_LEVEL: "{{ item.lines| select('search', '^MD_LEVEL=') | join('') | regex_replace('^[^=]+=(.+)$', '\\1') }}"
+    MD_DEVICES: "{{ item.lines | select('search', '^MD_DEVICES=') | join('') | regex_replace('^[^=]+=(.+)$', '\\1') }}"
+    MD_UUID:  "{{ item.lines | select('search', '^MD_UUID=') | join('') | regex_replace('^[^=]+=(.+)$', '\\1') }}"
+    entry: "ARRAY /dev/md/{{MD_DEVNAME}} level={{MD_LEVEL}} num-devices={{MD_DEVICES}} UUID={{MD_UUID}}"
+  with_items: "{{ array_details | json_query('results[*].{lines: stdout_lines}') }}"
+  changed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: arrays | Generating mdadm.conf
+  set_fact:
+    mdadm_conf_entries: "{{ array_details.stdout_lines }}"
+  changed_when: false
+  when: ansible_os_family != "RedHat"
 
 # Creating raid arrays filesystem
 - name: arrays | Creating Array(s) Filesystem
@@ -125,7 +151,7 @@
     regexp: "^{{ item }}"
     line: "{{ item }}"
     state: "present"
-  with_items: '{{ array_details.stdout_lines }}'
+  with_items: '{{ mdadm_conf_entries }}'
   when: array_created.changed
 
 # Updating mdadm.conf in order to not persist between reboots
