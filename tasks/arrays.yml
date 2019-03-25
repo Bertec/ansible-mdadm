@@ -1,10 +1,10 @@
 ---
 # Checking for any existing raid arrays
 - name: arrays | Checking Status Of Array(s)
-  shell: "cat /proc/mdstat | grep {{ item.name }}"
+  shell: "cat /proc/mdstat | grep $(realpath --relative-to=/dev /dev/{{ item.name }})"
   register: "array_check"
   changed_when: false
-  failed_when: false
+  failed_when: array_check.rc > 1
   with_items: '{{ mdadm_arrays }}'
   check_mode: no
 
